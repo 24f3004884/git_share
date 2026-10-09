@@ -151,11 +151,19 @@ def parse_question(q: str) -> dict:
         result["type"] = "top_customer"
 
     elif any(w in q_lower for w in [
-        "how many different customers", "how many unique customers",
-        "number of different customers", "number of unique customers",
-        "distinct customers", "different customers", "unique customers",
-        "how many customers placed", "customers who bought", "customers that bought",
-        "customers placed at least one", "how many different customers placed"
+        "how many different customers",
+        "how many unique customers",
+        "number of different customers",
+        "number of unique customers",
+        "distinct customers",
+        "different customers",
+        "unique customers",
+        "how many customers placed",
+        "customers who bought",
+        "customers that bought",
+        "customers placed at least one",
+        "how many different customers placed",
+        "different customers placed at least one"
     ]):
         result["type"] = "unique_customers"
 
