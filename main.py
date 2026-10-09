@@ -15,15 +15,264 @@ class Question(BaseModel):
     question: str
 
 # ---------- Helper functions ----------
-from collections import defaultdict
-import re
-from typing import Optional, List, Dict
 
 # ... (keep your ORDERS loading and Question model)
+from collections import defaultdict
+from typing import Optional, List, Dict, Set
+import re
 
+# ============================================================
+# Helper functions
+# ============================================================
+
+def filter_orders(
+    region: Optional[str] = None,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    product: Optional[str] = None,
+    customer: Optional[str] = None,
+    status: Optional[str] = None,
+) -> List[Dict]:
+    result = []
+    for o in ORDERS:
+        if status and o["status"] != status:
+            continue
+        if region and o["region"].lower() != region.lower():
+            continue
+        if product and o["product"].lower() != product.lower():
+            continue
+        if customer and o["customer"].lower() != customer.lower():
+            continue
+        if year and o["created_kolkata"].year != year:
+            continue
+        if month and o["created_kolkata"].month != month:
+            continue
+        result.append(o)
+    return result
+
+def calculate_revenue(**kwargs) -> float:
+    orders = filter_orders(**kwargs)
+    return round(sum(o["amount_usd"] for o in orders), 2)
+
+def count_orders(**kwargs) -> int:
+    return len(filter_orders(**kwargs))
+
+def count_unique_customers(**kwargs) -> int:
+    orders = filter_orders(**kwargs)
+    return len({o["customer"] for o in orders})
+
+def count_unique_products(**kwargs) -> int:
+    orders = filter_orders(**kwargs)
+    return len({o["product"] for o in orders})
+
+def average_order_value(**kwargs) -> float:
+    orders = filter_orders(**kwargs)
+    if not orders:
+        return 0.0
+    total = sum(o["amount_usd"] for o in orders)
+    return round(total / len(orders), 2)
+
+def get_top_product(**kwargs) -> str:
+    # force paid for revenue ranking
+    kwargs = {k: v for k, v in kwargs.items() if k != "status"}
+    orders = filter_orders(status="paid", **kwargs)
+    revenue = defaultdict(float)
+    for o in orders:
+        revenue[o["product"]] += o["amount_usd"]
+    if not revenue:
+        return "None"
+    return max(revenue.items(), key=lambda x: x[1])[0]
+
+def get_top_region(**kwargs) -> str:
+    kwargs = {k: v for k, v in kwargs.items() if k != "status"}
+    orders = filter_orders(status="paid", **kwargs)
+    revenue = defaultdict(float)
+    for o in orders:
+        revenue[o["region"]] += o["amount_usd"]
+    if not revenue:
+        return "None"
+    return max(revenue.items(), key=lambda x: x[1])[0]
+
+def get_top_customer(**kwargs) -> str:
+    kwargs = {k: v for k, v in kwargs.items() if k != "status"}
+    orders = filter_orders(status="paid", **kwargs)
+    revenue = defaultdict(float)
+    for o in orders:
+        revenue[o["customer"]] += o["amount_usd"]
+    if not revenue:
+        return "None"
+    return max(revenue.items(), key=lambda x: x[1])[0]
+
+def total_quantity(**kwargs) -> int:
+    orders = filter_orders(**kwargs)
+    return sum(o.get("qty", 1) for o in orders)
+
+def get_all_products() -> Set[str]:
+    return {o["product"] for o in ORDERS}
+
+# ============================================================
+# Parser
+# ============================================================
+
+def parse_question(q: str) -> dict:
+    q_lower = q.lower().strip()
+    result = {
+        "type": "revenue",
+        "region": None,
+        "year": None,
+        "month": None,
+        "product": None,
+        "customer": None,
+        "status": "paid",
+    }
+
+    # ---------- Detect type (order matters) ----------
+    if any(w in q_lower for w in [
+        "top-selling product", "top selling product", "best-selling product",
+        "best selling product", "highest revenue product", "product with the most revenue",
+        "which product generated the most", "most popular product by revenue"
+    ]):
+        result["type"] = "top_product"
+
+    elif any(w in q_lower for w in [
+        "top region", "best region", "region with the most revenue",
+        "which region generated the most", "highest revenue region"
+    ]):
+        result["type"] = "top_region"
+
+    elif any(w in q_lower for w in [
+        "top customer", "best customer", "customer with the most revenue",
+        "which customer spent the most", "highest revenue customer"
+    ]):
+        result["type"] = "top_customer"
+
+    elif any(w in q_lower for w in [
+        "how many different customers", "how many unique customers",
+        "number of different customers", "number of unique customers",
+        "distinct customers", "different customers", "unique customers"
+    ]):
+        result["type"] = "unique_customers"
+
+    elif any(w in q_lower for w in [
+        "how many different products", "how many unique products",
+        "number of different products", "number of unique products",
+        "distinct products", "unique products"
+    ]):
+        result["type"] = "unique_products"
+
+    elif any(w in q_lower for w in [
+        "total quantity", "total units", "how many units", "total qty"
+    ]):
+        result["type"] = "total_quantity"
+
+    elif any(w in q_lower for w in [
+        "count", "how many", "number of", "how many orders"
+    ]):
+        result["type"] = "count"
+
+    elif any(w in q_lower for w in [
+        "average", "avg", "on average", "mean", "worth", "average value", "average order"
+    ]):
+        result["type"] = "average"
+
+    elif "refund" in q_lower:
+        result["type"] = "refunds"
+        result["status"] = "refunded"
+
+    # ---------- Status ----------
+    if "refund" in q_lower:
+        result["status"] = "refunded"
+    elif "void" in q_lower:
+        result["status"] = "void"
+    elif "paid" in q_lower:
+        result["status"] = "paid"
+
+    # ---------- Region ----------
+    for r in ["North", "South", "East", "West", "Central"]:
+        if r.lower() in q_lower:
+            result["region"] = r
+            break
+
+    # ---------- Year ----------
+    year_match = re.search(r"\b(20\d{2})\b", q)
+    if year_match:
+        result["year"] = int(year_match.group(1))
+
+    # ---------- Month ----------
+    months = {
+        "january": 1, "february": 2, "march": 3, "april": 4,
+        "may": 5, "june": 6, "july": 7, "august": 8,
+        "september": 9, "october": 10, "november": 11, "december": 12,
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4,
+        "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12
+    }
+    for name, num in months.items():
+        if name in q_lower:
+            result["month"] = num
+            break
+
+    # ---------- Product (longer names first) ----------
+    known_products = get_all_products() | {
+        "Mixer", "Blender", "Juicer", "Kettle", "Grinder",
+        "Air Fryer", "Toaster", "Rice Cooker", "Coffee Maker",
+        "Microwave", "Oven", "Fan", "Heater", "Iron"
+    }
+    for p in sorted(known_products, key=len, reverse=True):
+        if p.lower() in q_lower:
+            result["product"] = p
+            break
+
+    # ---------- Customer ID ----------
+    cust_match = re.search(r"\b(C\d{4})\b", q, re.IGNORECASE)
+    if cust_match:
+        result["customer"] = cust_match.group(1).upper()
+
+    return result
+
+# ============================================================
+# Endpoint
+# ============================================================
+
+@app.post("/")
+def answer(q: Question):
+    parsed = parse_question(q.question)
+
+    kwargs = {
+        "region": parsed["region"],
+        "year": parsed["year"],
+        "month": parsed["month"],
+        "product": parsed["product"],
+        "customer": parsed["customer"],
+        "status": parsed["status"],
+    }
+
+    t = parsed["type"]
+
+    if t == "top_product":
+        result = get_top_product(**kwargs)
+    elif t == "top_region":
+        result = get_top_region(**kwargs)
+    elif t == "top_customer":
+        result = get_top_customer(**kwargs)
+    elif t == "unique_customers":
+        result = count_unique_customers(**kwargs)
+    elif t == "unique_products":
+        result = count_unique_products(**kwargs)
+    elif t == "total_quantity":
+        result = total_quantity(**kwargs)
+    elif t == "count":
+        result = count_orders(**kwargs)
+    elif t == "average":
+        result = average_order_value(**kwargs)
+    elif t == "refunds":
+        result = calculate_revenue(**kwargs)
+    else:  # revenue
+        result = calculate_revenue(**kwargs)
+
+    return {"answer": result}
 # ---------- Helper functions ----------
 
-def calculate_revenue(
+'''def calculate_revenue(
     region: Optional[str] = None,
     year: Optional[int] = None,
     month: Optional[int] = None,
@@ -252,7 +501,7 @@ def answer(q: Question):
             status="paid"
         )
 
-    return {"answer": result}
+    return {"answer": result}'''
 '''def calculate_revenue(
     region: Optional[str] = None,
     year: Optional[int] = None,
