@@ -95,6 +95,36 @@ def get_top_product(
     top = max(revenue_by_product.items(), key=lambda x: x[1])
     return top[0]
 
+def average_order_value(
+    region: Optional[str] = None,
+    year: Optional[int] = None,
+    month: Optional[int] = None,
+    product: Optional[str] = None,
+    customer: Optional[str] = None,
+    status: str = "paid",
+) -> float:
+    total = 0.0
+    count = 0
+    for o in ORDERS:
+        if o["status"] != status:
+            continue
+        if region and o["region"].lower() != region.lower():
+            continue
+        if product and o["product"].lower() != product.lower():
+            continue
+        if customer and o["customer"].lower() != customer.lower():
+            continue
+        if year and o["created_kolkata"].year != year:
+            continue
+        if month and o["created_kolkata"].month != month:
+            continue
+        total += o["amount_usd"]
+        count += 1
+
+    if count == 0:
+        return 0.0
+    return round(total / count, 2)
+
 # ---------- Parser ----------
 def parse_question(q: str) -> dict:
     q_lower = q.lower()
@@ -160,6 +190,18 @@ def parse_question(q: str) -> dict:
     if cust_match:
         result["customer"] = cust_match.group(1).upper()
 
+
+        # Detect type
+    if any(word in q_lower for word in ["top-selling", "top selling", "best-selling", "best selling", "highest revenue product"]):
+        result["type"] = "top_product"
+    elif "count" in q_lower or "how many" in q_lower or "number of" in q_lower:
+        result["type"] = "count"
+    elif "average" in q_lower or "avg" in q_lower or "on average" in q_lower or "mean" in q_lower:
+        result["type"] = "average"
+    elif "refund" in q_lower:
+        result["type"] = "refunds"
+
+
     return result
 
 # ---------- Endpoint ----------
@@ -181,6 +223,15 @@ def answer(q: Question):
             product=parsed["product"],
             customer=parsed["customer"],
             status=parsed["status"]
+        )
+    elif parsed["type"] == "average":
+        result = average_order_value(
+            region=parsed["region"],
+            year=parsed["year"],
+            month=parsed["month"],
+            product=parsed["product"],
+            customer=parsed["customer"],
+            status="paid"          # default to paid for average value questions
         )
     elif parsed["type"] == "refunds":
         result = calculate_revenue(
