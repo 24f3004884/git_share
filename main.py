@@ -1,37 +1,28 @@
 from fastapi import FastAPI
 from pydantic import BaseModel
-from typing import Optional, List, Dict
+from collections import defaultdict
+from typing import Optional, List, Dict, Set
 import re
+
 from data_loader import load_and_clean_orders
 
 app = FastAPI(title="Acme Ledger Agent")
 
-# ---------- Load data once at startup ----------
+# ============================================================
+# Load data once at startup
+# ============================================================
 print("Loading and cleaning orders...")
 ORDERS: List[Dict] = load_and_clean_orders()
-print("Ready to answer questions.")
+print(f"Ready. Loaded {len(ORDERS)} unique orders.")
+
 
 class Question(BaseModel):
     question: str
 
-# ---------- Helper functions ----------
-
-# ... (keep your ORDERS loading and Question model)
-from collections import defaultdict
-from typing import Optional, List, Dict, Set
-import re
-
-# ============================================================
-# Helper functions
-# ============================================================
-from collections import defaultdict
-from typing import Optional, List, Dict, Set
-import re
 
 # ============================================================
 # Core filter
 # ============================================================
-
 def filter_orders(
     region: Optional[str] = None,
     year: Optional[int] = None,
@@ -57,22 +48,26 @@ def filter_orders(
         result.append(o)
     return result
 
+
 # ============================================================
 # Metrics
 # ============================================================
-
 def calculate_revenue(**kwargs) -> float:
     orders = filter_orders(**kwargs)
     return round(sum(o["amount_usd"] for o in orders), 2)
 
+
 def count_orders(**kwargs) -> int:
     return len(filter_orders(**kwargs))
+
 
 def count_unique_customers(**kwargs) -> int:
     return len({o["customer"] for o in filter_orders(**kwargs)})
 
+
 def count_unique_products(**kwargs) -> int:
     return len({o["product"] for o in filter_orders(**kwargs)})
+
 
 def average_order_value(**kwargs) -> float:
     orders = filter_orders(**kwargs)
@@ -81,8 +76,10 @@ def average_order_value(**kwargs) -> float:
     total = sum(o["amount_usd"] for o in orders)
     return round(total / len(orders), 2)
 
+
 def total_quantity(**kwargs) -> int:
     return sum(o.get("qty", 1) for o in filter_orders(**kwargs))
+
 
 def get_top_product(**kwargs) -> str:
     kwargs.pop("status", None)
@@ -92,6 +89,7 @@ def get_top_product(**kwargs) -> str:
         rev[o["product"]] += o["amount_usd"]
     return max(rev.items(), key=lambda x: x[1])[0] if rev else "None"
 
+
 def get_top_region(**kwargs) -> str:
     kwargs.pop("status", None)
     orders = filter_orders(status="paid", **kwargs)
@@ -99,6 +97,7 @@ def get_top_region(**kwargs) -> str:
     for o in orders:
         rev[o["region"]] += o["amount_usd"]
     return max(rev.items(), key=lambda x: x[1])[0] if rev else "None"
+
 
 def get_top_customer(**kwargs) -> str:
     kwargs.pop("status", None)
@@ -108,13 +107,14 @@ def get_top_customer(**kwargs) -> str:
         rev[o["customer"]] += o["amount_usd"]
     return max(rev.items(), key=lambda x: x[1])[0] if rev else "None"
 
+
 def get_all_products() -> Set[str]:
     return {o["product"] for o in ORDERS}
 
-# ============================================================
-# Parser – more patterns
-# ============================================================
 
+# ============================================================
+# Parser
+# ============================================================
 def parse_question(q: str) -> dict:
     q_lower = q.lower().strip()
     result = {
@@ -127,7 +127,7 @@ def parse_question(q: str) -> dict:
         "status": "paid",
     }
 
-    # ---- Type detection (order is important) ----
+    # ---------- Type detection (ORDER IS CRITICAL) ----------
     if any(w in q_lower for w in [
         "top-selling product", "top selling product", "best-selling product",
         "best selling product", "highest revenue product", "product with the most revenue",
@@ -151,7 +151,8 @@ def parse_question(q: str) -> dict:
         "how many different customers", "how many unique customers",
         "number of different customers", "number of unique customers",
         "distinct customers", "different customers", "unique customers",
-        "how many customers placed", "customers who bought", "customers that bought"
+        "how many customers placed", "customers who bought", "customers that bought",
+        "customers placed at least one"
     ]):
         result["type"] = "unique_customers"
 
@@ -161,6 +162,14 @@ def parse_question(q: str) -> dict:
         "distinct products", "unique products"
     ]):
         result["type"] = "unique_products"
+
+    # Average MUST come before generic "how many"
+    elif any(w in q_lower for w in [
+        "on average", "average", "avg", "mean", "worth",
+        "average value", "average order",
+        "how many us dollars is a", "how many dollars is a"
+    ]):
+        result["type"] = "average"
 
     elif any(w in q_lower for w in [
         "total quantity", "total units", "how many units", "total qty", "units sold"
@@ -172,17 +181,11 @@ def parse_question(q: str) -> dict:
     ]):
         result["type"] = "count"
 
-    elif any(w in q_lower for w in [
-        "average", "avg", "on average", "mean", "worth", "average value",
-        "average order", "average paid", "how many us dollars is a"
-    ]):
-        result["type"] = "average"
-
     elif "refund" in q_lower:
         result["type"] = "refunds"
         result["status"] = "refunded"
 
-    # ---- Status ----
+    # ---------- Status ----------
     if "refund" in q_lower:
         result["status"] = "refunded"
     elif "void" in q_lower:
@@ -190,18 +193,18 @@ def parse_question(q: str) -> dict:
     elif "paid" in q_lower:
         result["status"] = "paid"
 
-    # ---- Region ----
+    # ---------- Region ----------
     for r in ["North", "South", "East", "West", "Central"]:
         if r.lower() in q_lower:
             result["region"] = r
             break
 
-    # ---- Year ----
+    # ---------- Year ----------
     year_match = re.search(r"\b(20\d{2})\b", q)
     if year_match:
         result["year"] = int(year_match.group(1))
 
-    # ---- Month ----
+    # ---------- Month ----------
     months = {
         "january": 1, "february": 2, "march": 3, "april": 4,
         "may": 5, "june": 6, "july": 7, "august": 8,
@@ -214,7 +217,7 @@ def parse_question(q: str) -> dict:
             result["month"] = num
             break
 
-    # ---- Product ----
+    # ---------- Product (longer names first) ----------
     known = get_all_products() | {
         "Mixer", "Blender", "Juicer", "Kettle", "Grinder",
         "Air Fryer", "Toaster", "Rice Cooker", "Coffee Maker",
@@ -225,17 +228,17 @@ def parse_question(q: str) -> dict:
             result["product"] = p
             break
 
-    # ---- Customer ----
+    # ---------- Customer ID ----------
     cust = re.search(r"\b(C\d{4})\b", q, re.IGNORECASE)
     if cust:
         result["customer"] = cust.group(1).upper()
 
     return result
 
-# ============================================================
-# Endpoint
-# ============================================================
 
+# ============================================================
+# Main endpoint
+# ============================================================
 @app.post("/")
 def answer(q: Question):
     parsed = parse_question(q.question)
@@ -274,10 +277,27 @@ def answer(q: Question):
 
     return {"answer": result}
 
-# Health check (optional)
+
+# ============================================================
+# Debug endpoints (temporary – remove later if you want)
+# ============================================================
 @app.get("/health")
 def health():
     return {"status": "ok", "orders_loaded": len(ORDERS)}
+
+
+@app.get("/debug/air-fryer")
+def debug_air_fryer():
+    paid = [o for o in ORDERS if o["status"] == "paid"]
+    related = sorted({o["product"] for o in paid if "air" in o["product"].lower() or "fryer" in o["product"].lower()})
+    air = [o for o in paid if o["product"].lower() == "air fryer"]
+    return {
+        "related_product_names": related,
+        "exact_air_fryer_orders": len(air),
+        "unique_customers_exact": len({o["customer"] for o in air}),
+        "sample": air[:2] if air else []
+    }
+
 
 @app.get("/debug/average-north")
 def debug_avg_north():
@@ -285,9 +305,4 @@ def debug_avg_north():
     total = sum(o["amount_usd"] for o in orders)
     count = len(orders)
     avg = round(total / count, 2) if count else 0
-    return {
-        "count": count,
-        "total": round(total, 2),
-        "average": avg,
-        "sample": orders[:3] if orders else []
-    }
+    return {"count": count, "total": round(total, 2), "average": avg}
