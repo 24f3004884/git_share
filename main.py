@@ -131,10 +131,13 @@ def parse_question(q: str) -> dict:
     if any(w in q_lower for w in [
         "top-selling product", "top selling product", "best-selling product",
         "best selling product", "highest revenue product", "product with the most revenue",
-        "which product generated", "most revenue product", "top product by revenue"
+        "which product generated", "most revenue product", "top product by revenue",
+        "which product earned", "product earned the most", "product that earned the most",
+        "product with highest revenue", "product with the highest", "earned the most usd",
+        "earned the most revenue", "which product had the most", "product that made the most"
     ]):
         result["type"] = "top_product"
-
+    
     elif any(w in q_lower for w in [
         "top region", "best region", "region with the most revenue",
         "which region generated", "highest revenue region", "top region by revenue"
@@ -306,3 +309,16 @@ def debug_avg_north():
     count = len(orders)
     avg = round(total / count, 2) if count else 0
     return {"count": count, "total": round(total, 2), "average": avg}
+
+@app.get("/debug/top-feb")
+def debug_top_feb():
+    product = get_top_product(year=2026, month=2)
+    orders = filter_orders(status="paid", year=2026, month=2)
+    rev = defaultdict(float)
+    for o in orders:
+        rev[o["product"]] += o["amount_usd"]
+    top5 = sorted(rev.items(), key=lambda x: x[1], reverse=True)[:5]
+    return {
+        "top_product": product,
+        "top5": top5
+    }
