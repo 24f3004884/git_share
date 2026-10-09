@@ -155,7 +155,7 @@ def parse_question(q: str) -> dict:
         "number of different customers", "number of unique customers",
         "distinct customers", "different customers", "unique customers",
         "how many customers placed", "customers who bought", "customers that bought",
-        "customers placed at least one"
+        "customers placed at least one", "how many different customers placed"
     ]):
         result["type"] = "unique_customers"
 
@@ -321,4 +321,20 @@ def debug_top_feb():
     return {
         "top_product": product,
         "top5": top5
+    }
+
+@app.get("/debug/grinder")
+def debug_grinder():
+    paid = [o for o in ORDERS if o["status"] == "paid"]
+    
+    related = sorted({o["product"] for o in paid if "grind" in o["product"].lower()})
+    
+    grinder_orders = [o for o in paid if o["product"].lower() == "grinder"]
+    unique_customers = len({o["customer"] for o in grinder_orders})
+    
+    return {
+        "related_product_names": related,
+        "exact_grinder_orders": len(grinder_orders),
+        "unique_customers_exact": unique_customers,
+        "sample": grinder_orders[:2] if grinder_orders else []
     }
